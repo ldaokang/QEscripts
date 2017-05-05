@@ -1,6 +1,7 @@
 #QERUN.SH 2017 by Michael Lee
 #TURNS XYZ FILES INTO INPUT FILES & EXECUTES (OPTIONAL)
-
+#ONE CHANGE!
+echo "initializing"
 update_elem () { #update this function depending on elements used
 	case $1 in
 		'H')
