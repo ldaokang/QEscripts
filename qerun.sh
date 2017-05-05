@@ -25,8 +25,10 @@ rm_filelist (){
 
 while read prefix
 do
-	INPUT_FILE=$(printf $prefix".in") #pipe all to this file
+	INPUT_FILE=$(printf $prefix".in")
 	>$INPUT_FILE
+	PBS_FILE=$(printf "run-"$prefix".pbs")
+	>$PBS_FILE
 	XYZ=$(printf $prefix".xyz")
 	tail -n+3 $XYZ | cut -c1-2 | sort | uniq -c > NAT_TYP_ARR.tmp #array of elements
 	TYP_ARR=($(cut -c9-10 NAT_TYP_ARR.tmp))  #array of elements
@@ -46,8 +48,9 @@ do
 	done
 	NBND=$(($NBND+10)) #buffer NBND by 10
 
-#SUBSTITUTION OF VARIABLES INTO DEFAULT INPUT FILE
+#SUBSTITUTION & PRINT
 #TO INSERT NEW VARIABLE, BREAK PRINTF STREAM & PRINTF AT DESIRED LINE
+#PRINT TO INPUT_FILE
 printf "&control
     calculation = 'relax'
     restart_mode='from_scratch'
@@ -86,6 +89,36 @@ printf "&control
 	printf "ATOMIC_POSITIONS (angstrom)\n" >> $INPUT_FILE
 	tail -n+3 $XYZ | tr -d '\r' >> $INPUT_FILE #print coordinates, fixes non-unix endline escape key
 	printf "K_POINTS (automatic) \n18 18 1 0 0 0" >> $INPUT_FILE
+
+#PRINT TO PBS_FILE
+printf "#!/bin/sh
+#PBS -N QuantumEspresso
+# ask for 3 chunks of 24 cores, flat MPI (48 processes in total)
+#PBS -l select=3:ncpus=24:mpiprocs=24:ompthreads=1:mem=96gb
+# modify for required runtime
+#PBS -l walltime=20:00:00
+# Send standard output and standard error to same output file
+#PBS -j oe
+
+inputfile=%s
+
+echo 'PBS_O_WORKDIR is : \$PBS_O_WORKDIR'
+echo 'PBS JOB DIR is: \$PBS_JOBDIR'
+# Notice that the output of pwd will be in lustre scratch space
+echo 'PWD is : \`pwd\`\'
+
+# load default module environment for Quantum Espresso
+# The default build is a flat MPI build
+module load quantum-espresso
+
+# change directory into the directory which has been copied into sandbox
+cd \${PBS_O_WORKDIR}
+
+# run the executable
+mpirun pw.x -i \$inputfile > output-%s.\$PBS_JOBID
+
+# all files will now be copied back into location specified by stageout setting
+" $INPUT_FILE $prefix >> $PBS_FILE
 
 rm_filelist
 done < prefixes
