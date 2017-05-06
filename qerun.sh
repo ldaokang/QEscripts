@@ -43,6 +43,7 @@ GLOBAL_ECUTWFC=40.0
 GLOBAL_ECUTRHO=480.0
 GLOBAL_DEGAUSS=0.001
 GLOBAL_KPOINTS=(18 18 1 0 0 0)
+
 while read -r -u "$pf" prefix
 do
 	ecutwfc=$GLOBAL_ECUTWFC
@@ -143,7 +144,11 @@ do
 				then GLOBAL_DEGAUSS=$degauss
 				fi;;
 			[kK]) 
-				read -r -p "Enter new values for K Points: " kpoints;;
+				read -r -p "Enter new values for K Points: " kpoints
+				read -r -p "Apply to all files?[y/n]" yn
+				if [ yn = "y" ]
+				then GLOBAL_KPOINTS=${kpoints[@]}
+				fi;;
 			*) break;;
 		esac	
 	done
