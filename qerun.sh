@@ -52,9 +52,7 @@ do
 	pseudopot=""
 	val=-1
 	INPUT_FILE=$(printf $prefix".in")
-	>$INPUT_FILE
 	PBS_FILE=$(printf "run-"$prefix".pbs")
-	>$PBS_FILE
 	XYZ=$(printf $prefix".xyz")
 	
 	if [ ! -f $XYZ ] #Check if XYZ file exists
