@@ -2,6 +2,7 @@
 #INPUT: *.xyz
 #OUPUT: *.in & *pbs (with option to qsub)
 
+#USER-EDITABLE:
 update_elem () {
 	case $1 in
 		'H')
@@ -25,31 +26,31 @@ update_elem () {
 }
 
 printparams () {
-	echo "Writing $prefix.in with parameters:"
+	echo "INFO: $prefix.in parameters:"
 	printf "NATOM: $NATOM \n"
 	printf "NTYP: $NTYP \n"
 	printf "NBND: $NBND \n"
 	printf "ecutwfc = %.1f \n" $ecutwfc
 	printf "ecutrho = %.1f \n" $ecutrho
-	printf "ecutrho = %.1g \n" $degauss
-	printf "KPOINTS: %s \n" "${kpoints[@]}"
+	printf "degauss = %.1g \n" $degauss
+	printf "KPOINTS: %s \n" "${kpoints[*]}"
 }
 
 rm_filelist (){ #rm .tmp files
 	rm NAT_TYP_ARR.tmp
+	#echo ".tmp not destroyed"
 }
 
-GLOBAL_ECUTWFC=40.0
-GLOBAL_ECUTRHO=480.0
-GLOBAL_DEGAUSS=0.001
-GLOBAL_KPOINTS=(18 18 1 0 0 0)
+ecutwfc=40.0
+ecutrho=480.0
+degauss=0.001
+kpoints=(18 18 1 0 0 0)
+
+#END-USER-EDITABLE
 
 while read -r -u "$pf" prefix
 do
-	ecutwfc=$GLOBAL_ECUTWFC
-	ecutrho=$GLOBAL_ECUTRHO
-	degauss=$GLOBAL_DEGAUSS
-	kpoints=${GLOBAL_KPOINTS[@]}
+	exit_err="ERROR: $prefix terminated"
 	pseudopot=""
 	val=-1
 	INPUT_FILE=$(printf $prefix".in")
@@ -58,40 +59,53 @@ do
 	
 	if [ ! -f $XYZ ] #Check if XYZ file exists
 	then
-		echo "$XYZ not found. Terminating job."
+		echo "ERROR: $XYZ not found"
 		continue
 	else
-		echo "Analysing $XYZ..."
+		echo "CHECKING: $XYZ"
 	fi
 
 	if [ ! -d $prefix ] #Check if prefix directory exists
 	then
-		echo "Subdirectory $prefix not found"
-		read -r -p "mkdir $prefix [m], run here[h]? Press any other key to skip run" reply
+		echo "NOTICE: Subdirectory $prefix not found"
+		read -r -p "mkdir $prefix [m] or write here [h]? Terminate $prefix [any other key]: " reply
 		case "$reply" in
 			[mM])
-				echo "Making subdirectory $prefix"
+				echo "MAKING: subdir $prefix"
 				mkdir $prefix
 				cd $prefix
 				cp ../$XYZ .
 				;;
 			[hH])
-				echo "Running $prefix in this folder";;
+				echo "writing $prefix HERE";;
 			*)
-				echo "Skipping $prefix"
+				echo $exit_err
 				continue;;
 		esac
 	else
 		cd $prefix
 		if [ -f $INPUT_FILE ] #Check if input file exists
 		then
-			read -r -p "Replace $INPUT_FILE?[y/n]" reply
+			echo "WARNING: $INPUT_FILE already exists"
+			read -r -p "Replace $INPUT_FILE?[y/n] " reply
 			case $reply in
 				[yY])
-				        echo "Overwriting $INPUT_FILE"	
 					rm $INPUT_FILE;;
 				*) 
-					echo "Skipping $prefix"
+					echo $exit_err
+					cd ..
+					continue;;
+			esac
+		fi
+		if [ -f $PBS_FILE ] #Check if pbs file exists
+		then
+			echo "WARNING: $PBS_FILE already exists"
+			read -r -p "Replace $PBS_FILE?[y/n] " reply
+			case $reply in
+				[yY])
+					rm $PBS_FILE;;
+				*) 
+					echo $exit_err
 					cd ..
 					continue;;
 			esac
@@ -99,56 +113,49 @@ do
 		cp ../$XYZ .
 	fi
 #START XYZ ANALYSIS
-	tail -n+3 $XYZ | cut -c1-2 | sort | uniq -c > NAT_TYP_ARR.tmp #array of elements
-	TYP_ARR=($(cut -c9-10 NAT_TYP_ARR.tmp))  #array of elements
-	NATOM_ARR=($(cut -c6-7 NAT_TYP_ARR.tmp))  #array of number of atoms
-	NTYP=${#TYP_ARR[@]} #number of unique elements
-	NATOM=$(head -n1 $XYZ | tr -d '\r') #can check with sum atoms
+	tail -n+3 $XYZ | cut -c1-2 | sort | uniq -c > NAT_TYP_ARR.tmp #rough cut: NATOM lines of NTYP
+	NATOM_ARR=($(tr -s ' ' < NAT_TYP_ARR.tmp | cut -d ' ' -f2))  #array of number of atoms
+	TYP_ARR=($(tr -s ' ' < NAT_TYP_ARR.tmp | cut -d ' ' -f3))  #array of types of atoms
+	NTYP=${#TYP_ARR[@]}
+	NATOM=$(head -n1 $XYZ | tr -d '\r')
 	NBND=0 
-	PSEUDO_FILE="pseudo-template"
 	NATOM_CHK=0
 	elem_index=0
 	for i in "${TYP_ARR[@]}"
 	do
-		#PSEUDO_POTS[$elem_index]=$(grep -w $i $PSEUDO_FILE) #match whole words (not 'F' in 'UPF')
 		update_elem $i
 		NBND=$(($NBND+(${NATOM_ARR[$elem_index]}*val+1)/2))
 		NATOM_CHK=$(($NATOM_CHK+${NATOM_ARR[$elem_index]}))
+		PSEUDO_POTS[$elem_index]=$pseudopot
 		elem_index=$(($elem_index+1))
-		PSEUDO_POTS[$elem_index]=$pseudopot #match whole words (not 'F' in 'UPF')
 	done
 	NBND=$(($NBND+10)) #buffer NBND by 10
 #END XYZ ANLAYSIS
+
 	if [ ! $NATOM_CHK -eq $NATOM ] #Check no. of atoms
 	then
-		echo "Number of atoms in $XYZ is wrong. Skipping $prefix..."
+		echo "$exit_err : Incorrect NATOMS in $XYZ"
+		echo "$NATOM_CHK != $NATOM"
 		continue
 	fi
-	EDIT_PARAMS="y"
 	while true
 	do
 		printparams
-		read -r -p "Change: ecutwfc/ecutrho[e] K-points[k] degauss[d]? Press any other key to continue" reply
+		read -r -p "CHANGE: ecutwfc/ecutrho[e] | degauss[d] | K-points[k] ? ACCEPT parameters [any other key]: " reply
 	       	case "$reply" in
 			[eE]) 
 				read -r -p "Enter new value for ecutwfc: " ecutwfc
 				read -r -p "Enter new value for ecutrho: " ecutrho
-				read -r -p "Apply to all files?[y/n]" yn
-				if [ yn = "y" ]
-				then GLOBAL_ECUTWFC=$ecutwfc;GLOBAL_ECUTRHO=$ecutrho
-				fi;;
+				;;
 			[dD]) 
 				read -r -p "Enter new value for degauss: " degauss
-				read -r -p "Apply to all files?[y/n]" yn
-				if [ yn = "y" ]
-				then GLOBAL_DEGAUSS=$degauss
-				fi;;
+				;;
 			[kK]) 
-				read -r -p "Enter new values for K Points: " kpoints
-				read -r -p "Apply to all files?[y/n]" yn
-				if [ yn = "y" ]
-				then GLOBAL_KPOINTS=${kpoints[@]}
-				fi;;
+
+				read -r -p "New KPOINTS:" kp
+				kpoints=($(printf "%i %i %i %i %i %i" $kp))
+				;;
+
 			*) break;;
 		esac	
 	done
@@ -189,7 +196,7 @@ printf "&control
 	printf "%s\n" "${PSEUDO_POTS[@]}" >> $INPUT_FILE #print pseudopotentials
 	printf "ATOMIC_POSITIONS (angstrom)\n" >> $INPUT_FILE
 	tail -n+3 $XYZ | tr -d '\r' >> $INPUT_FILE #print coordinates, fixes non-unix endline escape key
-	printf "\nK_POINTS (automatic) \n%s\n" "${kpoints[@]}" >> $INPUT_FILE
+	printf "\nK_POINTS (automatic) \n%s\n" "${kpoints[*]}" >> $INPUT_FILE
 
 #PRINT TO PBS_FILE
 echo "PRINTING $PBS_FILE"
@@ -222,10 +229,10 @@ mpirun pw.x -i \$inputfile > output-%s.\$PBS_JOBID
 # all files will now be copied back into location specified by stageout setting
 " $prefix $INPUT_FILE $prefix >> $PBS_FILE
 read -r -p "qsub $PBS_FILE?[y/n]" yn
-if [ yn = "y" ]
+if [ $yn = 'y' ]
 then
-	echo "Submitting $PBS_FILE"
 	qsub $PBS_FILE > jobid
+	echo "SUBMITTIED $PBS_FILE with jobid $(cat jobid)"
 fi
 rm_filelist
 cd ..
